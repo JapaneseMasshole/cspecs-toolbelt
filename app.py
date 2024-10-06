@@ -1,64 +1,51 @@
-import sqlite3
 import streamlit as st
-import pandas as pd
 from datetime import datetime, timedelta
-import time
+from db.database import Database
+import pandas as pd
 
-# Function to query data from the database
+db = Database('./db/tickcapturejobs.db')
+
+# Replace query_data function
 def query_data():
-    connection = sqlite3.connect('./db/tickcapturejobs.db')
-    query = '''
-        SELECT jobs.job_id, jobs.job_name, 
-               strftime('%Y-%m-%d %H:%M:%S', job_startdatetime, 'unixepoch') AS job_startdatetime, 
-               job_status, 
-               (SELECT COUNT(*) FROM instruments WHERE instruments.job_id = jobs.job_id) AS instrument_count, 
-               (SELECT COUNT(*) FROM fields WHERE fields.job_id = jobs.job_id) AS field_count 
-        FROM jobs 
-        ORDER BY jobs.job_id DESC
-        LIMIT 5
-    '''
-    df = pd.read_sql_query(query, connection)
-    connection.close()
-    return df
+    return db.query_recent_jobs()
 
-# Function to insert data into the database
+# Replace insert_data function
 def insert_data(job_name, job_startdatetime, job_enddatetime, instruments, fields):
-    connection = sqlite3.connect('./db/tickcapturejobs.db')
-    cursor = connection.cursor()
+    db.insert_data(job_name, job_startdatetime, job_enddatetime, instruments, fields)
 
-    duration = int((job_enddatetime - job_startdatetime) / 60)  # Calculate duration in minutes
-
-    cursor.execute('''
-        INSERT INTO jobs (job_name, job_startdatetime, duration, job_status)
-        VALUES (?, ?, ?, ?)
-    ''', (job_name, job_startdatetime, duration, "NOT STARTED"))
-
-    job_id = cursor.lastrowid
-
-    for instrument in instruments:
-        cursor.execute('''
-            INSERT INTO instruments (instrument_name, job_id)
-            VALUES (?, ?)
-        ''', (instrument.strip(), job_id))
-
-    for field in fields:
-        cursor.execute('''
-            INSERT INTO fields (field_name, job_id)
-            VALUES (?, ?)
-        ''', (field.strip(), job_id))
-
-    connection.commit()
-    connection.close()
+# New function to delete selected jobs
+def delete_selected_jobs(job_ids):
+    for job_id in job_ids:
+        db.delete_job(job_id)
 
 # Streamlit UI
 st.title("Job Management")
 
-# Top Pane: Display DataFrame
+# Top Pane: Display DataFrame with checkboxes
 st.subheader("Recent Jobs")
 if 'df' not in st.session_state or st.session_state.get('refresh_data', False):
     st.session_state.df = query_data()
     st.session_state.refresh_data = False
-st.dataframe(st.session_state.df)
+
+# Add a checkbox column to the dataframe
+df_with_checkboxes = st.session_state.df.copy()
+df_with_checkboxes.insert(0, 'Select', False)
+
+# Use st.data_editor for an editable dataframe with checkboxes
+edited_df = st.data_editor(df_with_checkboxes, hide_index=True, disabled=df_with_checkboxes.columns[1:])
+
+# Add a delete button
+if st.button('Delete Selected Jobs'):
+    # Check if 'id' column exists, if not use the first column (excluding 'Select')
+    id_column = 'id' if 'id' in edited_df.columns else edited_df.columns[1]
+    selected_jobs = edited_df[edited_df['Select']][id_column].tolist()
+    if selected_jobs:
+        delete_selected_jobs(selected_jobs)
+        st.session_state.refresh_data = True
+        st.success(f"Selected jobs deleted successfully!")
+        st.rerun()
+    else:
+        st.warning("No jobs selected for deletion.")
 
 # Bottom Pane: Entry Form
 st.subheader("Add New Job")
