@@ -2,8 +2,12 @@ import streamlit as st
 from datetime import datetime, timedelta
 from db.database import Database
 import pandas as pd
+from components.subscriptionhandler import SubscriptionHandler
+import threading
 
 db = Database('./db/tickcapturejobs.db')
+subscription_handler = None
+subscription_thread = None
 
 def query_data():
     return db.query_recent_jobs()
@@ -15,7 +19,18 @@ def delete_selected_jobs(job_ids):
     for job_id in job_ids:
         db.delete_job(job_id)
 
+def run_subscription_handler():
+    global subscription_handler
+    subscription_handler = SubscriptionHandler("config/bpipe_config.json")
+    subscription_handler.start()
+
 def main():
+    global subscription_thread
+    
+    if subscription_thread is None:
+        subscription_thread = threading.Thread(target=run_subscription_handler)
+        subscription_thread.start()
+
     st.title("Job Management")
 
     # Top Pane: Display DataFrame with checkboxes

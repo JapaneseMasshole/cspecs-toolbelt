@@ -1,6 +1,7 @@
 import sqlite3
 from typing import List, Tuple, Optional
 import pandas as pd
+import json
 
 class Database:
     def __init__(self, db_path):
@@ -87,7 +88,45 @@ class Database:
         with self.conn:
             self.conn.execute(query, (job_id,))
 
+    def query_active_jobs(self, current_time):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT j.job_id, j.job_name, j.job_startdatetime, j.job_startdatetime + j.duration * 60 as job_enddatetime,
+                   GROUP_CONCAT(DISTINCT i.instrument_name) as instruments,
+                   GROUP_CONCAT(DISTINCT f.field_name) as fields
+            FROM jobs j
+            LEFT JOIN instruments i ON j.job_id = i.job_id
+            LEFT JOIN fields f ON j.job_id = f.job_id
+            WHERE j.job_startdatetime <= ? AND j.job_startdatetime + j.duration * 60 > ?
+            GROUP BY j.job_id
+        """, (current_time, current_time))
+        rows = cursor.fetchall()
+        conn.close()
+
+        return [
+            {
+                'id': row[0],
+                'job_name': row[1],
+                'job_startdatetime': row[2],
+                'job_enddatetime': row[3],
+                'instruments': row[4].split(',') if row[4] else [],
+                'fields': row[5].split(',') if row[5] else []
+            }
+            for row in rows
+        ]
+
     def __del__(self):
         if self.conn:
             self.conn.close()
             print("Database connection closed.")
+
+    def set_update_flag(self):
+        self._execute_command("UPDATE metadata SET value = 1 WHERE key = 'update_flag'")
+
+    def check_update_flag(self):
+        result = self._execute_query("SELECT value FROM metadata WHERE key = 'update_flag'")
+        return result[0][0] == 1 if result else False
+
+    def clear_update_flag(self):
+        self._execute_command("UPDATE metadata SET value = 0 WHERE key = 'update_flag'")
