@@ -1,0 +1,10 @@
+{"hosts":[
+                 {"addr":"jpn.cloudpoint.bloomberg.com","port":8194},
+                 {"addr":"hkg.cloudpoint.bloomberg.com","port":8194} 
+             ],
+"appname":"",
+"tlsInfo":
+          {"pk12path":"",
+           "password":"",
+           "pk7path":""}
+}
