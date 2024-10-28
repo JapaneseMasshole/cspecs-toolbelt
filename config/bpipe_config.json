@@ -2,7 +2,7 @@
                  {"addr":"jpn.cloudpoint.bloomberg.com","port":8194},
                  {"addr":"hkg.cloudpoint.bloomberg.com","port":8194} 
              ],
-"appname":"",
+"appname":"YourAppNameHere",
 "tlsInfo":
           {"pk12path":"",
            "password":"",

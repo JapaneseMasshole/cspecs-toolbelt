@@ -1,34 +1,49 @@
 import sqlite3
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 import pandas as pd
 import json
+from components.logger_config import get_logger
+
+logger = get_logger(__name__)
 
 class Database:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self.conn = None
+    def __init__(self, db_path: str):
+        self.db_path: str = db_path
+        self.conn: Optional[sqlite3.Connection] = None
         self.connect()
 
-    def connect(self):
+    def connect(self) -> None:
         try:
             self.conn = sqlite3.connect(self.db_path)
-            print(f"Connected to database: {self.db_path}")
+            logger.info(f"Connected to database: {self.db_path}")
         except sqlite3.Error as e:
-            print(f"Error connecting to database: {e}")
+            logger.error(f"Error connecting to database: {e}", exc_info=True)
+            raise
 
     def _execute_query(self, query: str, params: Tuple = ()) -> List[Tuple]:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            return cursor.fetchall()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                logger.debug(f"Executed query: {query}")
+                return cursor.fetchall()
+        except sqlite3.Error as e:
+            logger.error(f"Error executing query: {query}. Error: {e}", exc_info=True)
+            raise
 
     def _execute_command(self, command: str, params: Tuple = ()) -> None:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(command, params)
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(command, params)
+                conn.commit()
+                logger.debug(f"Executed command: {command}")
+        except sqlite3.Error as e:
+            logger.error(f"Error executing command: {command}. Error: {e}", exc_info=True)
+            raise
 
     def query_recent_jobs(self, limit: int = 5) -> pd.DataFrame:
+        logger.info(f"Querying {limit} recent jobs")
         query = '''
             SELECT jobs.job_id, jobs.job_name, 
                    strftime('%Y-%m-%d %H:%M:%S', job_startdatetime, 'unixepoch') AS job_startdatetime, 
@@ -39,94 +54,144 @@ class Database:
             ORDER BY jobs.job_id DESC
             LIMIT ?
         '''
-        with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql_query(query, conn, params=(limit,))
-        return df
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                df = pd.read_sql_query(query, conn, params=(limit,))
+            return df
+        except (sqlite3.Error, pd.io.sql.DatabaseError) as e:
+            logger.error(f"Error querying recent jobs: {e}", exc_info=True)
+            raise
 
     def insert_job(self, job_name: str, job_startdatetime: int, duration: int, job_status: str) -> int:
+        logger.info(f"Inserting new job: {job_name}")
         query = '''
             INSERT INTO jobs (job_name, job_startdatetime, duration, job_status)
             VALUES (?, ?, ?, ?)
         '''
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(query, (job_name, job_startdatetime, duration, job_status))
-            conn.commit()
-            return cursor.lastrowid
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, (job_name, job_startdatetime, duration, job_status))
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.Error as e:
+            logger.error(f"Error inserting job: {job_name}. Error: {e}", exc_info=True)
+            raise
 
     def insert_instruments(self, instruments: List[str], job_id: int) -> None:
         query = '''
             INSERT INTO instruments (instrument_name, job_id)
             VALUES (?, ?)
         '''
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            for instrument in instruments:
-                cursor.execute(query, (instrument.strip(), job_id))
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                for instrument in instruments:
+                    cursor.execute(query, (instrument.strip(), job_id))
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Error inserting instruments for job_id {job_id}. Error: {e}", exc_info=True)
+            raise
 
     def insert_fields(self, fields: List[str], job_id: int) -> None:
         query = '''
             INSERT INTO fields (field_name, job_id)
             VALUES (?, ?)
         '''
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            for field in fields:
-                cursor.execute(query, (field.strip(), job_id))
-            conn.commit()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                for field in fields:
+                    cursor.execute(query, (field.strip(), job_id))
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"Error inserting fields for job_id {job_id}. Error: {e}", exc_info=True)
+            raise
 
     def insert_data(self, job_name: str, job_startdatetime: int, job_enddatetime: int, 
                     instruments: List[str], fields: List[str]) -> None:
-        duration = int((job_enddatetime - job_startdatetime) / 60)  # Calculate duration in minutes
-        job_id = self.insert_job(job_name, job_startdatetime, duration, "NOT STARTED")
-        self.insert_instruments(instruments, job_id)
-        self.insert_fields(fields, job_id)
+        try:
+            duration = int((job_enddatetime - job_startdatetime) / 60)  # Calculate duration in minutes
+            job_id = self.insert_job(job_name, job_startdatetime, duration, "NOT STARTED")
+            self.insert_instruments(instruments, job_id)
+            self.insert_fields(fields, job_id)
+        except Exception as e:
+            logger.error(f"Error inserting data for job: {job_name}. Error: {e}", exc_info=True)
+            raise
 
-    def delete_job(self, job_id):
+    def delete_job(self, job_id: int) -> None:
+        logger.info(f"Deleting job with ID: {job_id}")
         query = "DELETE FROM jobs WHERE job_id = ?"
-        with self.conn:
-            self.conn.execute(query, (job_id,))
+        try:
+            with self.conn:
+                self.conn.execute(query, (job_id,))
+        except sqlite3.Error as e:
+            logger.error(f"Error deleting job with ID {job_id}. Error: {e}", exc_info=True)
+            raise
 
-    def query_active_jobs(self, current_time):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT j.job_id, j.job_name, j.job_startdatetime, j.job_startdatetime + j.duration * 60 as job_enddatetime,
-                   GROUP_CONCAT(DISTINCT i.instrument_name) as instruments,
-                   GROUP_CONCAT(DISTINCT f.field_name) as fields
-            FROM jobs j
-            LEFT JOIN instruments i ON j.job_id = i.job_id
-            LEFT JOIN fields f ON j.job_id = f.job_id
-            WHERE j.job_startdatetime <= ? AND j.job_startdatetime + j.duration * 60 > ?
-            GROUP BY j.job_id
-        """, (current_time, current_time))
-        rows = cursor.fetchall()
-        conn.close()
+    def query_active_jobs(self, current_time: float) -> List[Dict[str, Any]]:
+        logger.info(f"Querying active jobs at time: {current_time}")
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT j.job_id, j.job_name, j.job_startdatetime, j.job_startdatetime + j.duration * 60 as job_enddatetime,
+                       GROUP_CONCAT(DISTINCT i.instrument_name) as instruments,
+                       GROUP_CONCAT(DISTINCT f.field_name) as fields
+                FROM jobs j
+                LEFT JOIN instruments i ON j.job_id = i.job_id
+                LEFT JOIN fields f ON j.job_id = f.job_id
+                WHERE j.job_startdatetime <= ? AND j.job_startdatetime + j.duration * 60 > ?
+                GROUP BY j.job_id
+            """, (current_time, current_time))
+            rows = cursor.fetchall()
+            conn.close()
 
-        return [
-            {
-                'id': row[0],
-                'job_name': row[1],
-                'job_startdatetime': row[2],
-                'job_enddatetime': row[3],
-                'instruments': row[4].split(',') if row[4] else [],
-                'fields': row[5].split(',') if row[5] else []
-            }
-            for row in rows
-        ]
+            return [
+                {
+                    'id': row[0],
+                    'job_name': row[1],
+                    'job_startdatetime': row[2],
+                    'job_enddatetime': row[3],
+                    'instruments': row[4].split(',') if row[4] else [],
+                    'fields': row[5].split(',') if row[5] else []
+                }
+                for row in rows
+            ]
+        except sqlite3.Error as e:
+            logger.error(f"Error querying active jobs. Error: {e}", exc_info=True)
+            raise
 
-    def __del__(self):
+    def __del__(self) -> None:
         if self.conn:
-            self.conn.close()
-            print("Database connection closed.")
+            try:
+                self.conn.close()
+                logger.info("Database connection closed.")
+            except sqlite3.Error as e:
+                logger.error(f"Error closing database connection: {e}", exc_info=True)
 
-    def set_update_flag(self):
-        self._execute_command("UPDATE metadata SET value = 1 WHERE key = 'update_flag'")
+    def set_update_flag(self) -> None:
+        logger.info("Setting update flag")
+        try:
+            self._execute_command("UPDATE metadata SET value = 1 WHERE key = 'update_flag'")
+        except sqlite3.Error as e:
+            logger.error(f"Error setting update flag: {e}", exc_info=True)
+            raise
 
-    def check_update_flag(self):
-        result = self._execute_query("SELECT value FROM metadata WHERE key = 'update_flag'")
-        return result[0][0] == 1 if result else False
+    def check_update_flag(self) -> bool:
+        try:
+            result = self._execute_query("SELECT value FROM metadata WHERE key = 'update_flag'")
+            flag_value = result[0][0] == 1 if result else False
+            logger.debug(f"Checked update flag, value: {flag_value}")
+            return flag_value
+        except sqlite3.Error as e:
+            logger.error(f"Error checking update flag: {e}", exc_info=True)
+            raise
 
-    def clear_update_flag(self):
-        self._execute_command("UPDATE metadata SET value = 0 WHERE key = 'update_flag'")
+    def clear_update_flag(self) -> None:
+        logger.info("Clearing update flag")
+        try:
+            self._execute_command("UPDATE metadata SET value = 0 WHERE key = 'update_flag'")
+        except sqlite3.Error as e:
+            logger.error(f"Error clearing update flag: {e}", exc_info=True)
+            raise

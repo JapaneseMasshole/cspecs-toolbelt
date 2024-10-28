@@ -4,30 +4,44 @@ from db.database import Database
 import pandas as pd
 from components.subscriptionhandler import SubscriptionHandler
 import threading
+from components.logger_config import setup_logging, get_logger
+
+# Set up logging
+setup_logging()
+logger = get_logger(__name__)
 
 db = Database('./db/tickcapturejobs.db')
 subscription_handler = None
 subscription_thread = None
 
 def query_data():
+    logger.info("Querying recent jobs")
     return db.query_recent_jobs()
 
 def insert_data(job_name, job_startdatetime, job_enddatetime, instruments, fields):
+    logger.info(f"Inserting new job: {job_name}")
     db.insert_data(job_name, job_startdatetime, job_enddatetime, instruments, fields)
 
 def delete_selected_jobs(job_ids):
+    logger.info(f"Deleting jobs with IDs: {job_ids}")
     for job_id in job_ids:
         db.delete_job(job_id)
 
 def run_subscription_handler():
     global subscription_handler
-    subscription_handler = SubscriptionHandler("config/bpipe_config.json")
-    subscription_handler.start()
+    logger.info("Starting SubscriptionHandler")
+    try:
+        subscription_handler = SubscriptionHandler("config/bpipe_config.local.json")
+        subscription_handler.start()
+    except Exception as e:
+        logger.error(f"Error starting SubscriptionHandler: {str(e)}", exc_info=True)
+        # Optionally, you might want to set a flag or take some action to indicate the handler failed to start
 
 def main():
     global subscription_thread
     
     if subscription_thread is None:
+        logger.info("Initializing SubscriptionHandler thread")
         subscription_thread = threading.Thread(target=run_subscription_handler)
         subscription_thread.start()
 
@@ -114,6 +128,8 @@ def main():
     if st.session_state.get('refresh_data', False):
         st.session_state.df = query_data()
         st.session_state.refresh_data = False
+
+    logger.info("Streamlit app started")
 
 if __name__ == "__main__":
     main()

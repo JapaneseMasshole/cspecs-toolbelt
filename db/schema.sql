@@ -1,7 +1,7 @@
 DROP TABLE IF EXISTS instruments;
 DROP TABLE IF EXISTS fields;
 DROP TABLE IF EXISTS jobs;
-
+DROP TABLE IF EXISTS metadata;
 -- Create table jobs
 CREATE TABLE jobs (
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,4 +25,10 @@ CREATE TABLE fields (
     job_id INTEGER,
     FOREIGN KEY (job_id) REFERENCES jobs(job_id),
     UNIQUE (field_name, job_id)
+);
+
+-- Create table metadata
+CREATE TABLE metadata (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
 );
