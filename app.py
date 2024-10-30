@@ -82,16 +82,16 @@ def main():
         current_time = datetime.now()
 
         # Calculate the nearest quarter of the hour in the future
-        minutes = (current_time.minute // 15 + 1) * 15
+        minutes = (current_time.minute // 5 + 1) * 5
         if minutes == 60:
             minutes = 0
             current_time = current_time.replace(hour=current_time.hour + 1)
         default_start_time = current_time.replace(minute=minutes, second=0, microsecond=0).time()
         default_end_time = (datetime.combine(datetime.today(), default_start_time) + timedelta(minutes=15)).time()
 
-        job_starttime = st.time_input("Job Start Time", default_start_time)
+        job_starttime = st.time_input("Job Start Time", default_start_time,step=timedelta(minutes=5))
         job_enddatetime = st.date_input("Job End Date", datetime.now())
-        job_endtime = st.time_input("Job End Time", default_end_time)
+        job_endtime = st.time_input("Job End Time", default_end_time,step=timedelta(minutes=5))
         instruments = st.text_area("Instruments (one per line)", height=100)
         fields = st.text_area("Fields (one per line)", height=100)
 

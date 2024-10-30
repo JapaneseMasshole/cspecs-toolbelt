@@ -104,14 +104,16 @@ class SubscriptionHandler():
         self.last_cache_update = current_time
 
     def start_subscription(self, job: Dict[str, Any]) -> None:
-        logger.info(f"Starting subscription for job {job['id']}")
+        
         instruments: List[str] = job['instruments']
         fields: List[str] = job['fields']
+
+        logger.debug(f"Starting subscription for job {job['id']} with instruments: {instruments} and fields: {fields}")
         
         subscriptions: List[bp.SubscriptionList] = []
         for instrument in instruments:
             sub = bp.SubscriptionList()
-            sub.add(instrument, fields)
+            sub.add(instrument, fields=fields,correlationId=bp.CorrelationId({"jobid":job['id'],"security":instrument}))
             subscriptions.append(sub)
 
         self._session.subscribe(subscriptions)
