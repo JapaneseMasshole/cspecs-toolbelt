@@ -165,3 +165,4 @@ test-blpapi.ipynb
 config/certs/
 config/bpipe_config.local.json
 logs/*.log*
+.vscode/
