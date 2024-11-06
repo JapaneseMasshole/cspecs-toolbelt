@@ -2,6 +2,7 @@ import sqlite3
 from typing import List, Tuple, Optional, Dict, Any
 import pandas as pd
 import json
+import threading
 from components.logger_config import get_logger
 
 logger = get_logger(__name__)
@@ -9,35 +10,35 @@ logger = get_logger(__name__)
 class Database:
     def __init__(self, db_path: str):
         self.db_path: str = db_path
-        self.conn: Optional[sqlite3.Connection] = None
-        self.connect()
+        self._local = threading.local()
 
-    def connect(self) -> None:
-        try:
-            self.conn = sqlite3.connect(self.db_path)
-            logger.info(f"Connected to database: {self.db_path}")
-        except sqlite3.Error as e:
-            logger.error(f"Error connecting to database: {e}", exc_info=True)
-            raise
+    @property
+    def conn(self) -> sqlite3.Connection:
+        if not hasattr(self._local, 'conn'):
+            try:
+                self._local.conn = sqlite3.connect(self.db_path)
+                logger.debug(f"Created new database connection for thread {threading.get_ident()}")
+            except sqlite3.Error as e:
+                logger.error(f"Error creating database connection: {e}", exc_info=True)
+                raise
+        return self._local.conn
 
     def _execute_query(self, query: str, params: Tuple = ()) -> List[Tuple]:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-                logger.debug(f"Executed query: {query}")
-                return cursor.fetchall()
+            cursor = self.conn.cursor()
+            cursor.execute(query, params)
+            #logger.debug(f"Executed query: {query}")
+            return cursor.fetchall()
         except sqlite3.Error as e:
             logger.error(f"Error executing query: {query}. Error: {e}", exc_info=True)
             raise
 
     def _execute_command(self, command: str, params: Tuple = ()) -> None:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(command, params)
-                conn.commit()
-                logger.debug(f"Executed command: {command}")
+            cursor = self.conn.cursor()
+            cursor.execute(command, params)
+            self.conn.commit()
+            logger.debug(f"Executed command: {command}")
         except sqlite3.Error as e:
             logger.error(f"Error executing command: {command}. Error: {e}", exc_info=True)
             raise
@@ -69,11 +70,9 @@ class Database:
             VALUES (?, ?, ?, ?)
         '''
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(query, (job_name, job_startdatetime, duration, job_status))
-                conn.commit()
-                return cursor.lastrowid
+            cursor = self.conn.cursor()
+            cursor.execute(query, (job_name, job_startdatetime, duration, job_status))
+            return cursor.lastrowid
         except sqlite3.Error as e:
             logger.error(f"Error inserting job: {job_name}. Error: {e}", exc_info=True)
             raise
@@ -84,11 +83,9 @@ class Database:
             VALUES (?, ?)
         '''
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                for instrument in instruments:
-                    cursor.execute(query, (instrument.strip(), job_id))
-                conn.commit()
+            cursor = self.conn.cursor()
+            for instrument in instruments:
+                cursor.execute(query, (instrument.strip(), job_id))
         except sqlite3.Error as e:
             logger.error(f"Error inserting instruments for job_id {job_id}. Error: {e}", exc_info=True)
             raise
@@ -99,11 +96,9 @@ class Database:
             VALUES (?, ?)
         '''
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                for field in fields:
-                    cursor.execute(query, (field.strip(), job_id))
-                conn.commit()
+            cursor = self.conn.cursor()
+            for field in fields:
+                cursor.execute(query, (field.strip(), job_id))
         except sqlite3.Error as e:
             logger.error(f"Error inserting fields for job_id {job_id}. Error: {e}", exc_info=True)
             raise
@@ -123,8 +118,8 @@ class Database:
         logger.info(f"Deleting job with ID: {job_id}")
         query = "DELETE FROM jobs WHERE job_id = ?"
         try:
-            with self.conn:
-                self.conn.execute(query, (job_id,))
+            cursor = self.conn.cursor()
+            cursor.execute(query, (job_id,))
         except sqlite3.Error as e:
             logger.error(f"Error deleting job with ID {job_id}. Error: {e}", exc_info=True)
             raise
@@ -132,8 +127,7 @@ class Database:
     def query_active_jobs(self, current_time: float) -> List[Dict[str, Any]]:
         logger.info(f"Querying active jobs at time: {current_time}")
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            cursor = self.conn.cursor()
             cursor.execute("""
                 SELECT j.job_id, j.job_name, j.job_startdatetime, j.job_startdatetime + j.duration * 60 as job_enddatetime,
                        GROUP_CONCAT(DISTINCT i.instrument_name) as instruments,
@@ -145,7 +139,6 @@ class Database:
                 GROUP BY j.job_id
             """, (current_time, current_time))
             rows = cursor.fetchall()
-            conn.close()
 
             return [
                 {
@@ -162,13 +155,17 @@ class Database:
             logger.error(f"Error querying active jobs. Error: {e}", exc_info=True)
             raise
 
-    def __del__(self) -> None:
-        if self.conn:
+    def close(self) -> None:
+        if hasattr(self._local, 'conn'):
             try:
-                self.conn.close()
-                logger.info("Database connection closed.")
+                self._local.conn.close()
+                delattr(self._local, 'conn')
+                logger.info(f"Closed database connection for thread {threading.get_ident()}")
             except sqlite3.Error as e:
                 logger.error(f"Error closing database connection: {e}", exc_info=True)
+
+    def __del__(self) -> None:
+        self.close()
 
     def set_update_flag(self) -> None:
         logger.info("Setting update flag")
