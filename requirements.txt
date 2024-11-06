@@ -1,0 +1,5 @@
+streamlit
+ipykernel
+watchdog
+blpapi; sys_platform != "darwin" or platform_machine != "x86_64"
+blpapi==3.23.1; sys_platform == "darwin" and platform_machine == "x86_64"
